@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>王宇生日快乐！🎂</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: #1a1a2e;
+    font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    user-select: none;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    pointer-events: none; z-index: 10;
+  }
+  #birthday-text {
+    font-size: clamp(2rem, 6vw, 5rem);
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 0 30px #ff6b6b, 0 0 60px #ff6b6b, 0 0 90px #ffd93d;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+  }
+  #sub-text {
+    font-size: clamp(1rem, 3vw, 2rem);
+    color: #ffd93d;
+    margin-top: 20px;
+    opacity: 0;
+    transition: opacity 1.5s ease 0.5s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <div id="birthday-text">🎂 王宇 生日快乐！🎂</div>
+  <div id="sub-text">5000m 突破 17 分钟！你永远是我们的骄傲！</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── 动画阶段 ──
+// 0: 准备起跑  1: 跑步中  2: 冲线庆祝  3: 抛起+生日祝福
+let phase = 0;
+let phaseStart = 0;
+let animTime = 0;
+
+// 跑道参数
+const trackY = H * 0.55;
+const trackLen = W * 0.85;
+const trackStartX = W * 0.08;
+const trackEndX = trackStartX + trackLen;
+
+// 跑步参数
+let runnerX = trackStartX;
+let currentPace = 20;        // 分钟
+const targetPace = 17;
+const totalDistance = 5000;  // 米
+let distanceCovered = 0;
+
+// 人群
+let crowdPeople = [];
+let confetti = [];
+let sparks = [];
+
+// 人物动画
+let legAngle = 0;
+let legSpeed = 0;
+
+// 抛起状态
+let thrownY = 0;
+let thrownVY = 0;
+let throwCount = 0;
+let throwTimer = 0;
+
+function initCrowd() {
+  crowdPeople = [];
+  for (let i = 0; i < 60; i++) {
+    crowdPeople.push({
+      x: trackEndX + (Math.random() - 0.5) * 220,
+      baseY: trackY - 20 + (Math.random() - 0.5) * 100,
+      y: 0,
+      size: 8 + Math.random() * 16,
+      color: `hsl(${Math.random() * 360}, 80%, ${50 + Math.random() * 30}%)`,
+      offset: Math.random() * Math.PI * 2,
+      speed: 0.5 + Math.random() * 1.5,
+      armAngle: 0,
+    });
+  }
+}
+
+function initConfetti() {
+  confetti = [];
+  for (let i = 0; i < 200; i++) {
+    confetti.push({
+      x: trackEndX + (Math.random() - 0.5) * 300,
+      y: trackY - 30 - Math.random() * H * 0.8,
+      vy: -2 - Math.random() * 8,
+      vx: (Math.random() - 0.5) * 3,
+      size: 3 + Math.random() * 8,
+      color: `hsl(${Math.random() * 360}, 90%, ${50 + Math.random() * 40}%)`,
+      rot: Math.random() * 360,
+      rotV: (Math.random() - 0.5) * 10,
+      grav: 0.05 + Math.random() * 0.1,
+    });
+  }
+}
+
+function initSparks() {
+  sparks = [];
+  for (let i = 0; i < 60; i++) {
+    sparks.push({
+      x: trackEndX,
+      y: trackY - 30,
+      vx: (Math.random() - 0.5) * 12,
+      vy: -3 - Math.random() * 15,
+      life: 1,
+      decay: 0.008 + Math.random() * 0.025,
+      color: Math.random() < 0.5 ? '#ffd93d' : '#ff6b6b',
+      size: 1 + Math.random() * 3,
+    });
+  }
+}
+
+function reset() {
+  phase = 0;
+  phaseStart = 0;
+  animTime = 0;
+  runnerX = trackStartX;
+  currentPace = 20;
+  distanceCovered = 0;
+  legAngle = 0;
+  legSpeed = 0;
+  thrownY = 0;
+  thrownVY = 0;
+  throwCount = 0;
+  throwTimer = 0;
+  initCrowd();
+  document.getElementById('birthday-text').style.opacity = '0';
+  document.getElementById('sub-text').style.opacity = '0';
+}
+initCrowd();
+
+// ── 天空渐变 ──
+function drawSky(t) {
+  let skyHue, skySat;
+  if (phase < 2) {
+    // 跑步时是傍晚/夜间赛道
+    skyHue = 230;
+    skySat = 40;
+  } else if (phase === 2) {
+    // 庆祝时渐变到暖色
+    let prog = Math.min(1, (t - phaseStart) / 2);
+    skyHue = 230 + prog * 30;
+    skySat = 40 + prog * 40;
+  } else {
+    skyHue = 20;
+    skySat = 80;
+  }
+  let grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, `hsl(${skyHue}, ${skySat}%, 8%)`);
+  grad.addColorStop(0.5, `hsl(${skyHue}, ${skySat}%, 15%)`);
+  grad.addColorStop(1, `hsl(${skyHue}, ${skySat}%, 22%)`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ── 星星 ──
+const stars = Array.from({length: 80}, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H * 0.6,
+  r: 0.3 + Math.random() * 1.2,
+  twinkle: Math.random() * Math.PI * 2,
+  speed: 0.01 + Math.random() * 0.03,
+}));
+
+function drawStars(t) {
+  stars.forEach(s => {
+    let alpha = 0.3 + 0.7 * Math.abs(Math.sin(s.twinkle + t * s.speed));
+    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// ── 跑道 ──
+function drawTrack(t) {
+  // 地面
+  ctx.fillStyle = '#3d3d3d';
+  ctx.fillRect(0, trackY, W, H - trackY);
+
+  // 跑道本体
+  let trackHeight = 80;
+  let trackTop = trackY - trackHeight / 2;
+
+  // 跑道底色
+  ctx.fillStyle = '#c44d34';
+  ctx.beginPath();
+  ctx.roundRect(trackStartX - 10, trackTop, trackLen + 20, trackHeight, 6);
+  ctx.fill();
+
+  // 跑道纹理
+  ctx.fillStyle = '#d45a3f';
+  ctx.beginPath();
+  ctx.roundRect(trackStartX - 5, trackTop + 3, trackLen + 10, trackHeight - 6, 4);
+  ctx.fill();
+
+  // 分道线
+  let laneCount = 6;
+  let laneW = trackHeight / laneCount;
+  for (let i = 1; i < laneCount; i++) {
+    let ly = trackTop + i * laneW;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([20, 15]);
+    ctx.beginPath();
+    ctx.moveTo(trackStartX, ly);
+    ctx.lineTo(trackEndX, ly);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 起跑线
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(trackStartX + 10, trackTop + 5);
+  ctx.lineTo(trackStartX + 10, trackTop + trackHeight - 5);
+  ctx.stroke();
+
+  // 终点线 (黑白格子)
+  let finishX = trackEndX - 10;
+  let segH = 8;
+  for (let y = trackTop; y < trackTop + trackHeight; y += segH) {
+    let segIdx = Math.floor((y - trackTop) / segH);
+    ctx.fillStyle = segIdx % 2 === 0 ? '#000' : '#fff';
+    ctx.fillRect(finishX, y, 25, segH);
+  }
+
+  // 终点文字
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('FINISH', finishX + 12, trackTop - 12);
+
+  // 距离标记
+  for (let d = 0; d <= 5000; d += 1000) {
+    let mx = trackStartX + (d / 5000) * trackLen;
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mx, trackTop);
+    ctx.lineTo(mx, trackTop + trackHeight);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '10px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillText(`${d}m`, mx, trackTop - 3);
+  }
+}
+
+// ── 跑步人物 ──
+function drawRunner(x, y, legPhase, pace, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+
+  let bodyH = 30;
+  let isThrown = phase >= 3;
+
+  // 身体
+  ctx.fillStyle = '#2196F3';
+  ctx.beginPath();
+  ctx.roundRect(-8, -bodyH * 0.85, 16, bodyH, 6);
+  ctx.fill();
+
+  // 背心号码
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('王宇', 0, -bodyH * 0.35);
+
+  // 头
+  ctx.fillStyle = '#ffcc80';
+  ctx.beginPath();
+  ctx.arc(0, -bodyH - 6, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 头发
+  ctx.fillStyle = '#3e2723';
+  ctx.beginPath();
+  ctx.arc(0, -bodyH - 8, 10, Math.PI, 0);
+  ctx.fill();
+
+  // 眼睛
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(-3, -bodyH - 8, 1.5, 0, Math.PI * 2);
+  ctx.arc(3, -bodyH - 8, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 嘴巴 - 越跑越快越轻松，从紧张变成微笑
+  let mouthY = -bodyH - 2;
+  if (pace > 18.5) {
+    // 20min 吃力
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, mouthY, 3, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+  } else {
+    // 越来越轻松，微笑
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, mouthY - 1, 4, 0.1, Math.PI - 0.1, false);
+    ctx.stroke();
+  }
+
+  if (!isThrown || thrownY < 60) {
+    // 手臂
+    ctx.strokeStyle = '#ffcc80';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    let armSwing = Math.sin(legPhase) * 25;
+    // 左臂
+    ctx.beginPath();
+    ctx.moveTo(6, -bodyH * 0.7);
+    ctx.lineTo(6 + armSwing + 8, -bodyH * 0.2);
+    ctx.stroke();
+    // 右臂
+    ctx.beginPath();
+    ctx.moveTo(-6, -bodyH * 0.7);
+    ctx.lineTo(-6 - armSwing - 8, -bodyH * 0.2);
+    ctx.stroke();
+
+    // 腿
+    ctx.lineWidth = 5;
+    // 左腿
+    ctx.beginPath();
+    ctx.moveTo(-4, bodyH * 0.1);
+    ctx.lineTo(-4 - Math.sin(legPhase) * 18, bodyH * 0.1 + 18);
+    ctx.stroke();
+    // 右腿
+    ctx.beginPath();
+    ctx.moveTo(4, bodyH * 0.1);
+    ctx.lineTo(4 + Math.sin(legPhase) * 18, bodyH * 0.1 + 18);
+    ctx.stroke();
+  } else {
+    // 被抛起时手脚张开
+    ctx.strokeStyle = '#ffcc80';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    // 手臂张开
+    ctx.beginPath(); ctx.moveTo(6, -bodyH * 0.7); ctx.lineTo(22, -bodyH * 0.4 + 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-6, -bodyH * 0.7); ctx.lineTo(-22, -bodyH * 0.4 + 10); ctx.stroke();
+    // 腿张开
+    ctx.beginPath(); ctx.moveTo(-4, bodyH * 0.1); ctx.lineTo(-16, bodyH * 0.1 + 20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(4, bodyH * 0.1); ctx.lineTo(16, bodyH * 0.1 + 20); ctx.stroke();
+  }
+
+  // 跑鞋
+  ctx.fillStyle = '#e91e63';
+  ctx.lineWidth = 5;
+  if (!isThrown || thrownY < 60) {
+    let lFootX = -4 - Math.sin(legPhase) * 18;
+    let lFootY = bodyH * 0.1 + 18;
+    let rFootX = 4 + Math.sin(legPhase) * 18;
+    let rFootY = bodyH * 0.1 + 18;
+    ctx.beginPath();
+    ctx.arc(lFootX, lFootY + 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(rFootX, rFootY + 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// ── 人群 ──
+function drawPerson(cx, cy, size, color, armAngle) {
+  ctx.fillStyle = color;
+  // 身体
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.5, 0, Math.PI * 2);
+  ctx.fill();
+  // 头
+  ctx.fillStyle = '#ffcc80';
+  ctx.beginPath();
+  ctx.arc(cx, cy - size * 0.7, size * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  // 手臂
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx + size * 0.35, cy - size * 0.2);
+  ctx.lineTo(cx + size * 0.7, cy - size * 0.6 + Math.sin(armAngle) * 6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - size * 0.35, cy - size * 0.2);
+  ctx.lineTo(cx - size * 0.7, cy - size * 0.6 - Math.sin(armAngle) * 6);
+  ctx.stroke();
+}
+
+// ── 彩色粒子 ──
+function drawConfetti(t) {
+  confetti.forEach(c => {
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.rot);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(-c.size / 2, -c.size / 4, c.size, c.size / 2);
+    ctx.restore();
+  });
+}
+
+// ── 火花 ──
+function drawSparks() {
+  sparks.forEach(s => {
+    if (s.life <= 0) return;
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = s.life;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ── 速度/时间显示器 ──
+function drawHUD(t) {
+  // 左上角信息面板
+  let px = 20, py = 70;
+
+  // 背景
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.beginPath();
+  ctx.roundRect(px - 10, py - 30, 240, 110, 12);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(px - 10, py - 30, 240, 110, 12);
+  ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('🏃 5000m', px, py - 5);
+
+  ctx.fillStyle = '#ffd93d';
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText(`${currentPace.toFixed(2)}`, px, py + 22);
+  ctx.fillStyle = '#aaa';
+  ctx.font = '14px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('分钟', px + 120, py + 18);
+
+  // 进度条
+  ctx.fillStyle = '#555';
+  ctx.fillRect(px, py + 38, 200, 6);
+  let progress = (20 - currentPace) / (20 - targetPace);
+  let barGrad = ctx.createLinearGradient(px, 0, px + 200, 0);
+  barGrad.addColorStop(0, '#ff6b6b');
+  barGrad.addColorStop(1, '#ffd93d');
+  ctx.fillStyle = barGrad;
+  ctx.fillRect(px, py + 38, 200 * Math.min(1, progress), 6);
+
+  if (phase >= 2) {
+    ctx.fillStyle = '#ffd93d';
+    ctx.font = 'bold 13px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillText('🎯 突破 17 分钟！', px, py + 60);
+  }
+
+  // 距离进度
+  let distProgress = distanceCovered / totalDistance;
+  let distBarW = trackLen + 20;
+  let distBarX = trackStartX - 10;
+  let distBarY = trackY + 50;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(distBarX, distBarY, distBarW, 4);
+  let dGrad = ctx.createLinearGradient(distBarX, 0, distBarX + distBarW, 0);
+  dGrad.addColorStop(0, '#4fc3f7');
+  dGrad.addColorStop(1, '#00e676');
+  ctx.fillStyle = dGrad;
+  ctx.fillRect(distBarX, distBarY, distBarW * distProgress, 4);
+
+  // 距离文字
+  ctx.fillStyle = '#fff';
+  ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(distanceCovered)}m / ${totalDistance}m`, trackStartX + trackLen / 2, distBarY + 18);
+  ctx.textAlign = 'left';
+}
+
+// ── 抛起效果 ──
+function drawThrow(t) {
+  if (phase < 3) return;
+  let dt = t - phaseStart;
+  if (dt < 0.3) return;
+
+  // 被抛起的人物在人群上方
+  let throwPhase = dt - 0.3;
+  let groundY = trackY - 50;
+
+  // 弹跳物理
+  if (thrownY <= 0 && thrownVY <= 0) {
+    thrownVY = -8 - Math.random() * 4;
+    throwCount++;
+  }
+  thrownVY += 0.3; // 重力
+  thrownY += thrownVY;
+
+  // 画被抛起的人
+  let rx = trackEndX;
+  let ry = groundY + thrownY;
+
+  // 下方人群高举双手
+  crowdPeople.forEach((p, i) => {
+    let busy = Math.abs(p.x - trackEndX) < 80 && Math.abs(p.baseY - groundY) < 60;
+    if (busy) {
+      p.armAngle = -1.2 + Math.sin(t * 8 + i) * 0.3;
+      p.y = p.baseY - 10;
+    }
+  });
+
+  drawRunner(rx, ry, t * 12, currentPace);
+
+  // 抛起文字
+  if (throwCount >= 2 && throwCount <= 4) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉', rx, ry - 50);
+  }
+}
+
+// ── 主循环 ──
+function update(t) {
+  // t in seconds
+  let dt = Math.min(0.05, animTime > 0 ? t - animTime : 0.016);
+  animTime = t;
+  if (phaseStart === 0) phaseStart = t;
+
+  let elapsed = t - phaseStart;
+
+  // Phase transitions
+  if (phase === 0 && elapsed > 1.5) {
+    phase = 1;
+    phaseStart = t;
+    elapsed = 0;
+  }
+
+  if (phase === 1) {
+    // 跑步阶段：20min 到 17min
+    let runDuration = 8; // 8秒跑完
+    let progress = Math.min(1, elapsed / runDuration);
+
+    // 非线性加速：先慢后快
+    let eased = progress < 0.4
+      ? 0.5 * (progress / 0.4) * (progress / 0.4)
+      : 1 - 0.5 * ((1 - progress) / 0.6) * ((1 - progress) / 0.6);
+
+    currentPace = 20 - eased * (20 - targetPace);
+    distanceCovered = eased * totalDistance;
+    runnerX = trackStartX + eased * trackLen;
+
+    // 腿部速度随跑步速度变化
+    legSpeed = 8 + eased * 6;
+    legAngle += legSpeed * dt;
+
+    if (progress >= 1) {
+      runnerX = trackEndX;
+      distanceCovered = totalDistance;
+      currentPace = targetPace;
+      phase = 2;
+      phaseStart = t;
+      elapsed = 0;
+      initConfetti();
+      initSparks();
+    }
+  }
+
+  if (phase === 2) {
+    // 冲线后短暂停顿 + 人群围上来
+    legSpeed *= 0.9;
+
+    // 人群围向终点
+    crowdPeople.forEach(p => {
+      let targetX = trackEndX + (Math.random() - 0.5) * 100;
+      let targetY = trackY - 40 + (Math.random() - 0.5) * 60;
+      p.x += (targetX - p.x) * 0.04;
+      p.baseY += (targetY - p.baseY) * 0.04;
+      p.armAngle += p.speed * dt;
+    });
+
+    // 更新纸屑
+    confetti.forEach(c => {
+      c.vy += c.grav;
+      c.y += c.vy * dt * 10;
+      c.x += c.vx * dt * 10;
+      c.rot += c.rotV * dt * 10;
+      if (c.y > H) { c.y = trackY - 30; c.vy = -2 - Math.random() * 6; }
+    });
+
+    // 更新火花
+    sparks.forEach(s => {
+      s.life -= s.decay;
+      s.x += s.vx * dt * 10;
+      s.y += s.vy * dt * 10;
+      s.vy += 0.5 * dt * 10;
+    });
+
+    if (elapsed > 1.5) {
+      phase = 3;
+      phaseStart = t;
+      elapsed = 0;
+      thrownY = 0;
+      thrownVY = -10;
+      throwCount = 0;
+      throwTimer = 0;
+      initConfetti();
+      initSparks();
+
+      // 显示生日文字
+      document.getElementById('birthday-text').style.opacity = '1';
+      document.getElementById('sub-text').style.opacity = '1';
+    }
+  }
+
+  if (phase === 3) {
+    // 庆祝阶段：持续抛起 + 烟花
+    if (thrownY <= 0 && thrownVY <= 0) {
+      thrownVY = -(7 + Math.random() * 5);
+      throwCount++;
+      initSparks();
+    }
+    thrownVY += 0.25;
+    thrownY += thrownVY;
+
+    crowdPeople.forEach(p => {
+      p.armAngle += p.speed * dt;
+    });
+
+    confetti.forEach(c => {
+      c.vy += c.grav;
+      c.y += c.vy * dt * 15;
+      c.x += c.vx * dt * 15;
+      c.rot += c.rotV * dt * 15;
+      if (c.y > H) { c.y = -10; c.vy = -2 - Math.random() * 4; }
+    });
+
+    sparks.forEach(s => {
+      s.life -= s.decay;
+      s.x += s.vx * dt * 10;
+      s.y += s.vy * dt * 10;
+      s.vy += 0.5 * dt * 10;
+    });
+
+    // 每过几秒重新撒花
+    if (throwCount > 0 && throwCount % 4 === 0 && thrownY <= 0 && thrownVY <= -7) {
+      initConfetti();
+    }
+  }
+}
+
+// ── 渲染 ──
+function draw(tMs) {
+  const t = tMs / 1000;
+  update(t);
+
+  ctx.clearRect(0, 0, W, H);
+  drawSky(t);
+  drawStars(t);
+  drawTrack(t);
+
+  // 人群
+  crowdPeople.forEach(p => {
+    drawPerson(p.x, p.baseY + (p.y - p.baseY), p.size, p.color, p.armAngle);
+  });
+
+  // 纸屑
+  if (phase >= 2) drawConfetti(t);
+
+  // 火花
+  if (phase >= 2) drawSparks();
+
+  // 跑步者
+  if (phase < 3) {
+    let runnerGroundY = trackY - 45;
+    drawRunner(runnerX, runnerGroundY, legAngle, currentPace);
+  }
+
+  // 抛起效果
+  if (phase >= 3) {
+    let groundY = trackY - 50;
+    drawRunner(trackEndX, groundY + thrownY, t * 12, currentPace);
+
+    // "抛起光芒"
+    let glowGrad = ctx.createRadialGradient(trackEndX, groundY, 5, trackEndX, groundY, 120);
+    glowGrad.addColorStop(0, 'rgba(255,217,61,0.25)');
+    glowGrad.addColorStop(1, 'rgba(255,107,107,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(trackEndX, groundY, 120, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawHUD(t);
+
+  // Phase 0 倒计时
+  if (phase === 0) {
+    let countdown = Math.ceil(1.5 - (t - phaseStart));
+    if (countdown > 0) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 48px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(countdown, W / 2, H * 0.4);
+      ctx.font = '18px "PingFang SC","Microsoft YaHei",sans-serif';
+      ctx.fillText('准备起跑...', W / 2, H * 0.4 + 35);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  // 大标题 - Phase 3
+  if (phase >= 3) {
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(48, W * 0.06)}px "PingFang SC","Microsoft YaHei",sans-serif`;
+    ctx.textAlign = 'center';
+    let titleAlpha = Math.min(1, (t - phaseStart) / 1.5);
+    ctx.globalAlpha = titleAlpha;
+    ctx.fillText('🎂 王宇 生日快乐！🎂', W / 2, H * 0.13);
+    ctx.fillStyle = '#ffd93d';
+    ctx.font = `bold ${Math.min(24, W * 0.03)}px "PingFang SC","Microsoft YaHei",sans-serif`;
+    ctx.fillText('5000m 突破 17 分钟！你是我们的骄傲！', W / 2, H * 0.13 + 40);
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+}
+
+// ── 开始按钮 ──
+function showStartButton() {
+  // 画初始场景
+  ctx.clearRect(0, 0, W, H);
+  drawSky(0);
+  drawStars(0);
+  drawTrack(0);
+  crowdPeople.forEach(p => drawPerson(p.x, p.baseY, p.size, p.color, 0));
+  drawRunner(trackStartX, trackY - 45, 0, 20);
+
+  // 标题
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(40, W * 0.05)}px "PingFang SC","Microsoft YaHei",sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('🏃 王宇 · 5000m 挑战 🏃', W / 2, H * 0.18);
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = '16px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('目标：从 20 分钟突破到 17 分钟！', W / 2, H * 0.18 + 32);
+
+  // 播放按钮
+  let btnX = W / 2, btnY = H * 0.3;
+  ctx.fillStyle = '#ff6b6b';
+  ctx.beginPath();
+  ctx.arc(btnX, btnY, 35, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.moveTo(btnX - 10, btnY - 15);
+  ctx.lineTo(btnX - 10, btnY + 15);
+  ctx.lineTo(btnX + 18, btnY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '18px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillText('点击开始', btnX, btnY + 60);
+
+  ctx.textAlign = 'left';
+}
+
+showStartButton();
+
+// 点击开始
+canvas.addEventListener('click', () => {
+  if (animTime === 0 && phase === 0) {
+    phaseStart = performance.now() / 1000;
+    requestAnimationFrame(draw);
+  }
+});
+
+// 响应式处理
+window.addEventListener('resize', () => {
+  resize();
+  if (animTime === 0) showStartButton();
+});
+</script>
+</body>
+</html>
